@@ -222,7 +222,6 @@ details.teacher p{margin:8px 0 0;color:var(--soft)}
 </div>
 
 <script type="module">
-import { Client, handle_file } from "https://cdn.jsdelivr.net/npm/@gradio/client@2.1.0/dist/index.min.js";
 
 const $ = id => document.getElementById(id);
 const els = {
@@ -367,51 +366,82 @@ async function run(){
     const img   = await createImageBitmap(imageBlob);
     const [W,H] = [img.width, img.height];
 
-    let app;
+    const base = spaceBase(space);
+    const auth = token ? { Authorization: "Bearer " + token } : {};
+
+    /* 1) 서버 정보 확인 */
+    let prefix = "";
     try{
-      app = await Client.connect(space, token ? { token } : {});
+      const cr = await fetch(base + "/config", { headers: auth });
+      if (!cr.ok) throw new Error("config 응답 " + cr.status);
+      const cfg = await cr.json();
+      prefix = cfg.api_prefix || "";
     }catch(e){
-      const err = new Error("[연결 단계] " + errText(e));
-      err.stage = "connect";
-      throw err;
+      const err = new Error("[연결 단계] " + errText(e)); err.stage = "connect"; throw err;
     }
-    els.waitMsg.textContent = "발명품이 깨어나는 중이에요…";
-    setBar(12);
+    els.waitMsg.textContent = "그림을 AI에게 보내고 있어요…";
+    setBar(10);
 
-    const job = app.submit("/generate_video", {
-      input_image: handle_file(imageBlob),
-      prompt: buildPrompt(),
-      duration: secs,
-      enhance_prompt: true,
-      seed: 42,
-      randomize_seed: true,
-      height: H,
-      width: W
+    /* 2) 그림 올리기 */
+    let filePath;
+    try{
+      const fd = new FormData();
+      fd.append("files", imageBlob, "drawing.jpg");
+      const ur = await fetch(base + prefix + "/upload", { method:"POST", body: fd, headers: auth });
+      if (!ur.ok) throw new Error("upload 응답 " + ur.status);
+      filePath = (await ur.json())[0];
+    }catch(e){
+      const err = new Error("[그림 보내기 단계] " + errText(e)); err.stage = "connect"; throw err;
+    }
+    setBar(14);
+
+    /* 3) 영상 만들기 요청 */
+    const data = [
+      { path: filePath, orig_name: "drawing.jpg", meta: { _type: "gradio.FileData" } },
+      buildPrompt(), secs, true, 42, true, H, W
+    ];
+    const pr = await fetch(base + prefix + "/call/generate_video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      body: JSON.stringify({ data })
     });
+    if (!pr.ok) throw new Error("[요청 단계] 응답 " + pr.status + " " + (await pr.text()).slice(0,200));
+    const { event_id } = await pr.json();
+    els.waitMsg.textContent = "발명품이 깨어나는 중이에요…";
+    setBar(18);
 
-    let videoUrl = null;
-    for await (const msg of job){
-      if (msg.type === "status"){
-        if (msg.stage === "pending" && typeof msg.position === "number" && msg.position > 0){
-          els.waitMsg.textContent = "줄 서서 기다리는 중이에요";
-          els.waitSub.dataset.queue = "1";
-          els.waitSub.textContent = `내 앞에 ${msg.position}명` + (msg.eta ? ` · 약 ${Math.ceil(msg.eta)}초` : "");
-          setBar(15);
-        } else if (msg.stage === "generating" || (msg.stage === "pending" && !msg.position)){
-          delete els.waitSub.dataset.queue;
+    /* 4) 결과 기다리기 (서버가 순서대로 알려 줘요) */
+    const sr = await fetch(base + prefix + "/call/generate_video/" + event_id, { headers: auth });
+    if (!sr.ok || !sr.body) throw new Error("[결과 단계] 응답 " + sr.status);
+    const reader = sr.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", result = null, failMsg = null;
+    outer: while (true){
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0){
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (block.match(/^event:\s*(.*)$/m) || [])[1];
+        const dt = (block.match(/^data:\s*(.*)$/m) || [])[1];
+        if (ev === "generating" || ev === "heartbeat"){
           els.waitMsg.textContent = "발명품이 움직이기 시작했어요!";
-          const pd = msg.progress_data && msg.progress_data[0];
-          if (pd && pd.length) setBar(20 + 75 * (pd.index / pd.length));
-          else setBar(Math.min(90, parseFloat(els.bar.style.width) + 4));
-        } else if (msg.stage === "error"){
-          throw new Error("[생성 단계] " + (msg.message || "server error"));
+          setBar(Math.min(92, parseFloat(els.bar.style.width) + 2));
+        } else if (ev === "complete"){
+          try{ result = JSON.parse(dt); }catch{ result = null; }
+          break outer;
+        } else if (ev === "error"){
+          failMsg = (dt && dt !== "null") ? dt : "AI 서버가 오류를 보냈어요 (사용량 초과일 수 있어요)";
+          break outer;
         }
-      } else if (msg.type === "data"){
-        videoUrl = pickVideoUrl(msg.data && msg.data[0]);
-        break;
       }
     }
-    if (!videoUrl) throw new Error("no video");
+    try{ reader.cancel(); }catch{}
+    if (failMsg) throw new Error("[생성 단계] " + failMsg);
+    let videoUrl = pickVideoUrl(result && result[0]);
+    if (videoUrl && !/^https?:/.test(videoUrl)) videoUrl = base + prefix + "/file=" + videoUrl;
+    if (!videoUrl) throw new Error("[결과 단계] 영상이 비어 있어요");
     setBar(100);
     showResult(videoUrl);
   }catch(err){
@@ -419,6 +449,11 @@ async function run(){
   }finally{
     busy = false;
   }
+}
+
+function spaceBase(space){
+  if (/^https?:\/\//.test(space)) return space.replace(/\/+$/,"");
+  return "https://" + space.toLowerCase().replace(/[/._]/g, "-") + ".hf.space";
 }
 
 function pickVideoUrl(v){
@@ -484,15 +519,27 @@ $("btnTest").onclick = async () => {
     log(`① Hugging Face 사이트 접속: ✅ (서버 상태: ${stage || "알 수 없음"})`);
   }catch(e){ log(`① Hugging Face 사이트 접속: ❌ ${errText(e)}`); }
 
+  const base = spaceBase(space);
+  const auth = token ? { Authorization: "Bearer " + token } : {};
+  let prefix = null;
   try{
-    const r = await withTimeout(fetch(`https://${host}.hf.space/config`), 15000);
+    const r = await withTimeout(fetch(base + "/config", { headers: auth }), 15000);
+    if (r.ok){ const c = await r.json(); prefix = c.api_prefix || ""; }
     log(`② AI 서버 주소(${host}.hf.space) 접속: ${r.ok ? "✅" : "❌ 응답 " + r.status}`);
   }catch(e){ log(`② AI 서버 주소(${host}.hf.space) 접속: ❌ ${errText(e)}`); }
 
-  try{
-    await withTimeout(Client.connect(space, token ? { token } : {}), 30000);
-    log("③ AI 연결 준비: ✅");
-  }catch(e){ log(`③ AI 연결 준비: ❌ ${errText(e)}`); }
+  if (prefix !== null){
+    try{
+      const c = document.createElement("canvas"); c.width = c.height = 8;
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0,0,8,8);
+      const blob = await new Promise(res => c.toBlob(res, "image/png"));
+      const fd = new FormData(); fd.append("files", blob, "test.png");
+      const r = await withTimeout(fetch(base + prefix + "/upload", { method:"POST", body: fd, headers: auth }), 20000);
+      log(`③ 그림 보내기 시험: ${r.ok ? "✅" : "❌ 응답 " + r.status}`);
+    }catch(e){ log(`③ 그림 보내기 시험: ❌ ${errText(e)}`); }
+  } else {
+    log("③ 그림 보내기 시험: ②가 실패해서 건너뛰었어요");
+  }
 
   log("\n이 내용을 사진으로 찍어 Claude에게 보여 주세요.");
 };
