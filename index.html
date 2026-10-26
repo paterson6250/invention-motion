@@ -193,6 +193,7 @@ details.teacher p{margin:8px 0 0;color:var(--soft)}
   <section class="step error" id="errorBox" hidden aria-live="assertive">
     <h2>😢 움직이지 못했어요</h2>
     <p id="errorMsg" style="margin:0"></p>
+    <p class="hint" id="errorDetail" style="font-size:13px;word-break:break-all"></p>
     <button class="btn btn-main" id="btnErrRetry" type="button">🔁 다시 해 보기</button>
   </section>
 
@@ -212,6 +213,10 @@ details.teacher p{margin:8px 0 0;color:var(--soft)}
       <input id="seconds" type="text" value="3" inputmode="decimal">
     </div>
     <p>설정은 이 태블릿에만 저장돼요. 무료 AI 서버는 하루 사용량이 정해져 있어서, 많이 쓰면 다음 날까지 기다려야 할 수 있어요.</p>
+    <div class="field">
+      <button class="btn btn-sub" id="btnTest" type="button" style="font-size:18px;min-height:48px">🔍 연결 검사하기</button>
+      <pre id="testOut" style="white-space:pre-wrap;word-break:break-all;font-size:14px;margin:0;background:var(--paper);border:2px solid var(--line);border-radius:10px;padding:10px" hidden></pre>
+    </div>
   </details>
 
 </div>
@@ -362,7 +367,14 @@ async function run(){
     const img   = await createImageBitmap(imageBlob);
     const [W,H] = [img.width, img.height];
 
-    const app = await Client.connect(space, token ? { token } : {});
+    let app;
+    try{
+      app = await Client.connect(space, token ? { token } : {});
+    }catch(e){
+      const err = new Error("[연결 단계] " + errText(e));
+      err.stage = "connect";
+      throw err;
+    }
     els.waitMsg.textContent = "발명품이 깨어나는 중이에요…";
     setBar(12);
 
@@ -392,7 +404,7 @@ async function run(){
           if (pd && pd.length) setBar(20 + 75 * (pd.index / pd.length));
           else setBar(Math.min(90, parseFloat(els.bar.style.width) + 4));
         } else if (msg.stage === "error"){
-          throw new Error(msg.message || "server error");
+          throw new Error("[생성 단계] " + (msg.message || "server error"));
         }
       } else if (msg.type === "data"){
         videoUrl = pickVideoUrl(msg.data && msg.data[0]);
@@ -403,7 +415,7 @@ async function run(){
     setBar(100);
     showResult(videoUrl);
   }catch(err){
-    showError(explain(err));
+    showError(explain(err), errText(err));
   }finally{
     busy = false;
   }
@@ -416,11 +428,19 @@ function pickVideoUrl(v){
   return v.url || null;
 }
 
+function errText(e){
+  if (!e) return "알 수 없음";
+  if (typeof e === "string") return e;
+  const parts = [e.message, e.title, e.error, e.status && ("status " + e.status)].filter(Boolean);
+  if (parts.length) return parts.join(" / ");
+  try{ return JSON.stringify(e).slice(0,300); }catch{ return String(e); }
+}
+
 function explain(err){
-  const m = String(err && (err.message || err)).toLowerCase();
-  if (m.includes("quota") || m.includes("exceeded") || m.includes("zerogpu"))
+  const m = errText(err).toLowerCase();
+  if (m.includes("quota") || m.includes("exceeded") || m.includes("zerogpu") || m.includes("gpu task"))
     return "오늘 쓸 수 있는 무료 AI 시간을 다 썼어요. 내일 다시 해 보거나 선생님께 알려 주세요.";
-  if (m.includes("fetch") || m.includes("network") || m.includes("connect") || m.includes("sleep") || m.includes("paused"))
+  if (err && err.stage === "connect")
     return "AI 서버에 연결하지 못했어요. 인터넷을 확인하거나 잠시 뒤에 다시 해 보세요.";
   return "AI가 그림을 움직이다가 멈췄어요. 한 번 더 해 볼까요? (계속 안 되면 선생님께 알려 주세요)";
 }
@@ -443,10 +463,45 @@ async function showResult(url){
   els.result.scrollIntoView({behavior:"smooth", block:"start"});
 }
 
-function showError(text){
+/* ---------- 선생님용 연결 검사 ---------- */
+$("btnTest").onclick = async () => {
+  const out = $("testOut");
+  out.hidden = false;
+  const space = els.spaceId.value.trim() || "Lightricks/LTX-2-3";
+  const token = els.hfToken.value.trim();
+  const host = space.toLowerCase().replace(/[/._]/g, "-");
+  const lines = [];
+  const log = t => { lines.push(t); out.textContent = lines.join("\n"); };
+  log("검사 중… (최대 30초)");
+  lines.length = 0;
+
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("시간 초과")), ms))]);
+
+  try{
+    const r = await withTimeout(fetch(`https://huggingface.co/api/spaces/${space}`), 15000);
+    const j = await r.json();
+    const stage = j && j.runtime && j.runtime.stage;
+    log(`① Hugging Face 사이트 접속: ✅ (서버 상태: ${stage || "알 수 없음"})`);
+  }catch(e){ log(`① Hugging Face 사이트 접속: ❌ ${errText(e)}`); }
+
+  try{
+    const r = await withTimeout(fetch(`https://${host}.hf.space/config`), 15000);
+    log(`② AI 서버 주소(${host}.hf.space) 접속: ${r.ok ? "✅" : "❌ 응답 " + r.status}`);
+  }catch(e){ log(`② AI 서버 주소(${host}.hf.space) 접속: ❌ ${errText(e)}`); }
+
+  try{
+    await withTimeout(Client.connect(space, token ? { token } : {}), 30000);
+    log("③ AI 연결 준비: ✅");
+  }catch(e){ log(`③ AI 연결 준비: ❌ ${errText(e)}`); }
+
+  log("\n이 내용을 사진으로 찍어 Claude에게 보여 주세요.");
+};
+
+function showError(text, detail){
   stopWait();
   els.steps.forEach(s => s.hidden = false);
   els.errMsg.textContent = text;
+  $("errorDetail").textContent = detail ? "선생님께 보여 줄 내용: " + detail.slice(0,300) : "";
   els.error.hidden = false;
   els.error.scrollIntoView({behavior:"smooth", block:"center"});
 }
