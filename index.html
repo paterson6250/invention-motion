@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>움직이는 발명 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap">
+<style>
+/* 레이아웃: 모눈 발명 노트 한 장 — 위에서 아래로 ① 찍기 → ② 설명 → ③ 움직이기, 결과는 같은 노트 위에 */
+:root{
+  --paper:#fbfcf7;      /* 노트 종이 */
+  --grid:#dfe8ef;       /* 모눈선 */
+  --ink:#24323d;        /* 연필 글씨 */
+  --soft:#5d6f7c;       /* 보조 글씨 */
+  --blue:#2f6fd6;       /* 볼펜 파랑 (주요 버튼) */
+  --blue-ink:#ffffff;
+  --crayon:#f2b62b;     /* 크레용 노랑 (강조) */
+  --red:#d9473a;        /* 크레용 빨강 (오류) */
+  --card:#ffffff;
+  --line:#c9d6df;
+  --display:"Jua","Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --body:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background-color:var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px;
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:18px;
+  line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:24px 48px;
+}
+.wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-direction:column;gap:4px}
+.eyebrow{font-family:var(--display);color:var(--blue);letter-spacing:.08em;font-size:16px}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(32px,7vw,44px);line-height:1.2;margin:0;text-wrap:balance}
+h1 .mark{background:linear-gradient(transparent 58%,var(--crayon) 58%,var(--crayon) 88%,transparent 88%)}
+.lead{margin:0;color:var(--soft)}
+
+.step{background:var(--card);border:2px solid var(--line);border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.step h2{font-family:var(--display);font-weight:400;font-size:24px;margin:0;display:flex;align-items:center;gap:10px}
+.num{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--crayon);color:var(--ink);font-size:20px;flex:none}
+.hint{margin:0;color:var(--soft);font-size:16px}
+
+.shot{position:relative;border:3px dashed var(--line);border-radius:14px;min-height:220px;display:grid;place-items:center;overflow:hidden;background:var(--paper)}
+.shot img{display:block;max-width:100%;max-height:420px;object-fit:contain}
+.shot .empty{text-align:center;color:var(--soft);padding:24px;display:flex;flex-direction:column;gap:6px;align-items:center}
+.shot .empty b{font-family:var(--display);font-weight:400;font-size:22px;color:var(--ink)}
+
+.btn{appearance:none;border:0;border-radius:14px;font-family:var(--display);font-size:22px;padding:16px 22px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:60px;text-decoration:none}
+.btn:focus-visible{outline:4px solid var(--crayon);outline-offset:3px}
+.btn-main{background:var(--blue);color:var(--blue-ink);box-shadow:0 5px 0 #1f4f9e}
+.btn-main:active{transform:translateY(3px);box-shadow:0 2px 0 #1f4f9e}
+.btn-main:disabled{background:#9fb4d4;box-shadow:none;cursor:not-allowed}
+.btn-sub{background:var(--paper);color:var(--ink);border:2px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;gap:12px}
+.row .btn{flex:1 1 180px}
+.big{width:100%;font-size:26px;min-height:72px}
+
+label.lbl{font-family:var(--display);font-size:19px}
+input[type=text],textarea{width:100%;font:inherit;color:var(--ink);background:var(--paper);border:2px solid var(--line);border-radius:12px;padding:12px 14px}
+textarea{min-height:110px;resize:vertical;line-height:1.7}
+input[type=text]:focus,textarea:focus{outline:none;border-color:var(--blue)}
+.field{display:flex;flex-direction:column;gap:6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:inherit;font-size:16px;border:2px solid var(--line);background:var(--paper);color:var(--ink);border-radius:999px;padding:6px 14px;cursor:pointer}
+.chip:hover{border-color:var(--blue)}
+.chip:focus-visible{outline:3px solid var(--crayon)}
+.count{align-self:flex-end;font-size:14px;color:var(--soft);font-variant-numeric:tabular-nums}
+
+/* 기다리기 */
+.wait{text-align:center;align-items:center}
+.gear{width:96px;height:96px}
+.gear g{transform-origin:48px 48px;animation:spin 2.4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.gear g{animation:none}}
+.wait-msg{font-family:var(--display);font-size:24px;margin:0}
+.wait-sub{margin:0;color:var(--soft);font-variant-numeric:tabular-nums}
+.bar{width:100%;height:14px;border-radius:999px;background:var(--paper);border:2px solid var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:8%;background:var(--crayon);border-radius:999px;transition:width .8s ease}
+
+/* 결과 */
+.result video{width:100%;border-radius:14px;border:3px solid var(--ink);background:#000;display:block}
+.result-title{font-family:var(--display);font-size:26px;margin:0;text-align:center}
+.result-desc{margin:0;text-align:center;color:var(--soft)}
+
+.error{border-color:var(--red)}
+.error h2{color:var(--red)}
+
+/* 선생님 설정 */
+details.teacher{background:var(--card);border:2px dashed var(--line);border-radius:14px;padding:12px 16px;font-size:15px}
+details.teacher summary{cursor:pointer;color:var(--soft);font-family:var(--display);font-size:16px}
+details.teacher .field{margin-top:12px}
+details.teacher input{font-size:15px}
+details.teacher p{margin:8px 0 0;color:var(--soft)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">2학년 발명가 교실</span>
+    <h1>내 <span class="mark">발명품</span>이 움직여요!</h1>
+    <p class="lead">종이에 그린 발명품을 찍으면, 실제로 어떻게 움직이는지 AI가 보여 줘요.</p>
+  </header>
+
+  <!-- ① 찍기 -->
+  <section class="step" id="step1">
+    <h2><span class="num">1</span>발명품 그림 찍기</h2>
+    <p class="hint">그림이 화면에 꽉 차게, 그림자가 생기지 않게 찍어요.</p>
+    <div class="shot" id="shot">
+      <div class="empty" id="shotEmpty">
+        <b>📷 아직 사진이 없어요</b>
+        <span>아래 버튼을 눌러 그림을 찍어요</span>
+      </div>
+      <img id="preview" alt="내가 찍은 발명품 그림" hidden>
+    </div>
+    <input id="camera" class="sr" type="file" accept="image/*" capture="environment">
+    <input id="album" class="sr" type="file" accept="image/*">
+    <div class="row">
+      <button class="btn btn-main" id="btnCamera" type="button">📷 사진 찍기</button>
+      <button class="btn btn-sub" id="btnAlbum" type="button">🖼️ 앨범에서 고르기</button>
+    </div>
+  </section>
+
+  <!-- ② 설명 -->
+  <section class="step" id="step2">
+    <h2><span class="num">2</span>내 발명품 소개하기</h2>
+    <div class="field">
+      <label class="lbl" for="name">발명품 이름</label>
+      <input id="name" type="text" maxlength="30" placeholder="예) 날아가는 프로펠러 자전거">
+    </div>
+    <div class="field">
+      <label class="lbl" for="desc">어떻게 움직이나요?</label>
+      <textarea id="desc" maxlength="200" placeholder="예) 프로펠러가 빙글빙글 돌고, 뒤에서 불꽃이 나오면서 하늘로 둥실 떠올라요."></textarea>
+      <span class="count" id="count">0 / 200</span>
+    </div>
+    <p class="hint">눌러서 넣을 수도 있어요</p>
+    <div class="chips" id="chips">
+      <button class="chip" type="button">프로펠러가 빙글빙글 돌아요</button>
+      <button class="chip" type="button">바퀴가 굴러가요</button>
+      <button class="chip" type="button">날개가 펄럭여요</button>
+      <button class="chip" type="button">불꽃이 뿜어져 나와요</button>
+      <button class="chip" type="button">하늘로 둥실 떠올라요</button>
+      <button class="chip" type="button">불빛이 반짝반짝 켜져요</button>
+      <button class="chip" type="button">팔이 위아래로 움직여요</button>
+    </div>
+  </section>
+
+  <!-- ③ 움직이기 -->
+  <section class="step" id="step3">
+    <h2><span class="num">3</span>움직여 보기</h2>
+    <button class="btn btn-main big" id="btnGo" type="button" disabled>✨ 내 발명품 움직이기</button>
+    <p class="hint" id="goHint">먼저 그림을 찍어 주세요.</p>
+  </section>
+
+  <!-- 기다리기 -->
+  <section class="step wait" id="waitBox" hidden aria-live="polite">
+    <svg class="gear" viewBox="0 0 96 96" aria-hidden="true">
+      <g>
+        <circle cx="48" cy="48" r="16" fill="none" stroke="#24323d" stroke-width="5"/>
+        <path d="M48 8v14M48 74v14M8 48h14M74 48h14M19.7 19.7l9.9 9.9M66.4 66.4l9.9 9.9M19.7 76.3l9.9-9.9M66.4 29.6l9.9-9.9" stroke="#f2b62b" stroke-width="8" stroke-linecap="round"/>
+      </g>
+    </svg>
+    <p class="wait-msg" id="waitMsg">발명품이 깨어나는 중이에요…</p>
+    <div class="bar"><i id="barFill"></i></div>
+    <p class="wait-sub" id="waitSub">조금만 기다려 주세요</p>
+  </section>
+
+  <!-- 결과 -->
+  <section class="step result" id="resultBox" hidden>
+    <p class="result-title" id="resultTitle">짜잔! 내 발명품</p>
+    <video id="video" autoplay loop muted playsinline></video>
+    <p class="result-desc" id="resultDesc"></p>
+    <div class="row">
+      <a class="btn btn-sub" id="btnSave" download="내-발명품.mp4">💾 영상 저장</a>
+      <button class="btn btn-sub" id="btnRetry" type="button">🔁 다시 움직이기</button>
+      <button class="btn btn-main" id="btnNew" type="button">✏️ 새 그림 찍기</button>
+    </div>
+  </section>
+
+  <!-- 오류 -->
+  <section class="step error" id="errorBox" hidden aria-live="assertive">
+    <h2>😢 움직이지 못했어요</h2>
+    <p id="errorMsg" style="margin:0"></p>
+    <button class="btn btn-main" id="btnErrRetry" type="button">🔁 다시 해 보기</button>
+  </section>
+
+  <!-- 선생님 설정 -->
+  <details class="teacher">
+    <summary>선생님 설정</summary>
+    <div class="field">
+      <label for="spaceId">AI 서버 (Hugging Face Space 이름)</label>
+      <input id="spaceId" type="text" value="Lightricks/LTX-2-3" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="hfToken">Hugging Face 토큰 (선택)</label>
+      <input id="hfToken" type="text" placeholder="hf_… (비워 두면 로그인 없이 사용)" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="seconds">영상 길이(초)</label>
+      <input id="seconds" type="text" value="3" inputmode="decimal">
+    </div>
+    <p>설정은 이 태블릿에만 저장돼요. 무료 AI 서버는 하루 사용량이 정해져 있어서, 많이 쓰면 다음 날까지 기다려야 할 수 있어요.</p>
+  </details>
+
+</div>
+
+<script type="module">
+import { Client, handle_file } from "https://cdn.jsdelivr.net/npm/@gradio/client@2.1.0/dist/index.min.js";
+
+const $ = id => document.getElementById(id);
+const els = {
+  camera:$("camera"), album:$("album"), preview:$("preview"), shotEmpty:$("shotEmpty"),
+  name:$("name"), desc:$("desc"), count:$("count"), chips:$("chips"),
+  go:$("btnGo"), goHint:$("goHint"),
+  wait:$("waitBox"), waitMsg:$("waitMsg"), waitSub:$("waitSub"), bar:$("barFill"),
+  result:$("resultBox"), video:$("video"), rTitle:$("resultTitle"), rDesc:$("resultDesc"), save:$("btnSave"),
+  error:$("errorBox"), errMsg:$("errorMsg"),
+  spaceId:$("spaceId"), hfToken:$("hfToken"), seconds:$("seconds"),
+  steps:[$("step1"),$("step2"),$("step3")]
+};
+
+let imageBlob = null;   // AI에 보낼 정리된 그림
+let busy = false;
+
+/* ---------- 선생님 설정 저장 (이 기기에만) ---------- */
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch{ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch{} }
+};
+for (const k of ["spaceId","hfToken","seconds"]) {
+  const v = store.get("inv_"+k);
+  if (v !== null && v !== "") els[k].value = v;
+  els[k].addEventListener("change", () => store.set("inv_"+k, els[k].value.trim()));
+}
+
+/* ---------- ① 사진 ---------- */
+$("btnCamera").onclick = () => els.camera.click();
+$("btnAlbum").onclick  = () => els.album.click();
+els.camera.onchange = e => loadPhoto(e.target.files[0]);
+els.album.onchange  = e => loadPhoto(e.target.files[0]);
+
+async function loadPhoto(file){
+  if (!file) return;
+  try{
+    const img = await fileToImage(file);
+    imageBlob = await fitForAI(img);
+    els.preview.src = URL.createObjectURL(imageBlob);
+    els.preview.hidden = false;
+    els.shotEmpty.hidden = true;
+    els.go.disabled = false;
+    els.goHint.textContent = "준비 완료! 버튼을 눌러 보세요. (30초~몇 분 걸려요)";
+  }catch{
+    showError("사진을 열 수 없었어요. 다시 찍어 볼까요?");
+  }
+}
+
+function fileToImage(file){
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* 그림 비율에 맞춰 AI가 다루기 좋은 크기로 정리 (빈 곳은 흰 종이색) */
+function targetSize(w,h){
+  const r = w/h;
+  if (r > 1.2) return [768,512];
+  if (r < 0.83) return [512,768];
+  return [768,768];
+}
+function fitForAI(img){
+  const [W,H] = targetSize(img.naturalWidth, img.naturalHeight);
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = "#ffffff"; g.fillRect(0,0,W,H);
+  const s = Math.min(W/img.naturalWidth, H/img.naturalHeight);
+  const dw = img.naturalWidth*s, dh = img.naturalHeight*s;
+  g.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
+  return new Promise(res => c.toBlob(b => res(b), "image/jpeg", 0.9));
+}
+
+/* ---------- ② 설명 ---------- */
+els.desc.addEventListener("input", () => els.count.textContent = `${els.desc.value.length} / 200`);
+els.chips.addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const t = els.desc.value.trim();
+  const add = chip.textContent;
+  els.desc.value = (t ? (/[.!?요]$/.test(t) ? t+" " : t+", ") : "") + add;
+  if (els.desc.value.length > 200) els.desc.value = els.desc.value.slice(0,200);
+  els.desc.dispatchEvent(new Event("input"));
+});
+
+/* AI에게 주는 지시문: 그림 모양은 그대로, 발명품 부분만 제자리에서 움직이게 */
+function buildPrompt(){
+  const name = els.name.value.trim();
+  const desc = els.desc.value.trim();
+  let p = "A child's hand-drawn crayon picture of an imaginary invention on white paper comes to life. " +
+          "Keep the exact drawing, colors, crayon texture, lines and paper background unchanged. " +
+          "Static camera, no zoom, no new objects, no text. The parts of the invention move gently and smoothly, like a short looping animation.";
+  if (name) p += ` The invention is called: "${name}".`;
+  if (desc) p += ` How it moves (written in Korean by the child): ${desc}`;
+  return p;
+}
+
+/* ---------- ③ 움직이기 ---------- */
+els.go.onclick = run;
+$("btnRetry").onclick = run;
+$("btnErrRetry").onclick = run;
+$("btnNew").onclick = () => {
+  els.result.hidden = true;
+  els.preview.hidden = true; els.shotEmpty.hidden = false;
+  imageBlob = null; els.go.disabled = true;
+  els.goHint.textContent = "먼저 그림을 찍어 주세요.";
+  els.name.value = ""; els.desc.value = ""; els.desc.dispatchEvent(new Event("input"));
+  els.camera.value = ""; els.album.value = "";
+  window.scrollTo({top:0, behavior:"smooth"});
+};
+
+let ticker = null;
+function startWait(){
+  els.steps.forEach(s => s.hidden = true);
+  els.result.hidden = true; els.error.hidden = true;
+  els.wait.hidden = false;
+  setBar(6);
+  const t0 = Date.now();
+  clearInterval(ticker);
+  ticker = setInterval(() => {
+    const s = Math.round((Date.now()-t0)/1000);
+    els.waitSub.dataset.elapsed = s;
+    if (!els.waitSub.dataset.queue) els.waitSub.textContent = `${s}초 지났어요`;
+  }, 1000);
+  els.wait.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function stopWait(){ clearInterval(ticker); els.wait.hidden = true; delete els.waitSub.dataset.queue; }
+function setBar(p){ els.bar.style.width = Math.max(4, Math.min(100,p)) + "%"; }
+
+async function run(){
+  if (busy || !imageBlob) return;
+  busy = true;
+  startWait();
+  els.waitMsg.textContent = "AI 서버에 연결하고 있어요…";
+  try{
+    const space = els.spaceId.value.trim() || "Lightricks/LTX-2-3";
+    const token = els.hfToken.value.trim();
+    const secs  = Math.min(6, Math.max(1, parseFloat(els.seconds.value) || 3));
+    const img   = await createImageBitmap(imageBlob);
+    const [W,H] = [img.width, img.height];
+
+    const app = await Client.connect(space, token ? { token } : {});
+    els.waitMsg.textContent = "발명품이 깨어나는 중이에요…";
+    setBar(12);
+
+    const job = app.submit("/generate_video", {
+      input_image: handle_file(imageBlob),
+      prompt: buildPrompt(),
+      duration: secs,
+      enhance_prompt: true,
+      seed: 42,
+      randomize_seed: true,
+      height: H,
+      width: W
+    });
+
+    let videoUrl = null;
+    for await (const msg of job){
+      if (msg.type === "status"){
+        if (msg.stage === "pending" && typeof msg.position === "number" && msg.position > 0){
+          els.waitMsg.textContent = "줄 서서 기다리는 중이에요";
+          els.waitSub.dataset.queue = "1";
+          els.waitSub.textContent = `내 앞에 ${msg.position}명` + (msg.eta ? ` · 약 ${Math.ceil(msg.eta)}초` : "");
+          setBar(15);
+        } else if (msg.stage === "generating" || (msg.stage === "pending" && !msg.position)){
+          delete els.waitSub.dataset.queue;
+          els.waitMsg.textContent = "발명품이 움직이기 시작했어요!";
+          const pd = msg.progress_data && msg.progress_data[0];
+          if (pd && pd.length) setBar(20 + 75 * (pd.index / pd.length));
+          else setBar(Math.min(90, parseFloat(els.bar.style.width) + 4));
+        } else if (msg.stage === "error"){
+          throw new Error(msg.message || "server error");
+        }
+      } else if (msg.type === "data"){
+        videoUrl = pickVideoUrl(msg.data && msg.data[0]);
+        break;
+      }
+    }
+    if (!videoUrl) throw new Error("no video");
+    setBar(100);
+    showResult(videoUrl);
+  }catch(err){
+    showError(explain(err));
+  }finally{
+    busy = false;
+  }
+}
+
+function pickVideoUrl(v){
+  if (!v) return null;
+  if (typeof v === "string") return v;
+  if (v.video) return v.video.url || v.video.path || null;
+  return v.url || null;
+}
+
+function explain(err){
+  const m = String(err && (err.message || err)).toLowerCase();
+  if (m.includes("quota") || m.includes("exceeded") || m.includes("zerogpu"))
+    return "오늘 쓸 수 있는 무료 AI 시간을 다 썼어요. 내일 다시 해 보거나 선생님께 알려 주세요.";
+  if (m.includes("fetch") || m.includes("network") || m.includes("connect") || m.includes("sleep") || m.includes("paused"))
+    return "AI 서버에 연결하지 못했어요. 인터넷을 확인하거나 잠시 뒤에 다시 해 보세요.";
+  return "AI가 그림을 움직이다가 멈췄어요. 한 번 더 해 볼까요? (계속 안 되면 선생님께 알려 주세요)";
+}
+
+async function showResult(url){
+  stopWait();
+  els.steps.forEach(s => s.hidden = false);
+  els.steps[2].hidden = true;
+  els.rTitle.textContent = els.name.value.trim() ? `짜잔! ${els.name.value.trim()}` : "짜잔! 내 발명품";
+  els.rDesc.textContent = els.desc.value.trim();
+  els.video.src = url;
+  els.save.href = url;
+  try{
+    const r = await fetch(url);
+    const b = await r.blob();
+    const local = URL.createObjectURL(b);
+    els.video.src = local; els.save.href = local;
+  }catch{}
+  els.result.hidden = false;
+  els.result.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function showError(text){
+  stopWait();
+  els.steps.forEach(s => s.hidden = false);
+  els.errMsg.textContent = text;
+  els.error.hidden = false;
+  els.error.scrollIntoView({behavior:"smooth", block:"center"});
+}
+</script>
+</body>
+</html>
