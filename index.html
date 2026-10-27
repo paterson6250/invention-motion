@@ -735,8 +735,11 @@ function findPaper(src){
     if (df < bl[2]) bl = [x, y, df];
   }
   const sc = 1 / k, pad = 0.5;
-  return [[tl[0]+pad, tl[1]+pad], [tr[0]+1-pad, tr[1]+pad], [br[0]+1-pad, br[1]+1-pad], [bl[0]+pad, bl[1]+1-pad]]
-    .map(([x, y]) => [Math.max(0, Math.min(W, x * sc)), Math.max(0, Math.min(H, y * sc))]);
+  const q = [[tl[0]+pad, tl[1]+pad], [tr[0]+1-pad, tr[1]+pad], [br[0]+1-pad, br[1]+1-pad], [bl[0]+pad, bl[1]+1-pad]]
+    .map(([x, y]) => [x * sc, y * sc]);
+  // 종이 가장자리의 책상·그림자가 끼지 않게 살짝 안쪽으로
+  const mx = q.reduce((s,p)=>s+p[0],0)/4, my = q.reduce((s,p)=>s+p[1],0)/4;
+  return q.map(([x, y]) => [Math.max(0, Math.min(W, x + (mx - x) * 0.025)), Math.max(0, Math.min(H, y + (my - y) * 0.025))]);
 }
 
 function drawCrop(){
@@ -1007,18 +1010,41 @@ function computeInk(){
     }
   };
   const A = new Float32Array(n), B = new Float32Array(n);
-  maxPass(Lm, A, w, h, 1, w); maxPass(A, B, h, w, w, 1);              // 주변에서 가장 밝은 종이
+  // 카메라 사진의 자글자글한 잡티 줄이기 (3×3 평균을 두 번)
+  const Ls = new Float32Array(n), Cs = new Float32Array(n);
+  boxPass(Lm, A, w, h, 1, w, 1); boxPass(A, Ls, h, w, w, 1, 1);      // 밝기는 한 번만 (가는 연필 선이 흐려지지 않게)
+  boxPass(C, A, w, h, 1, w, 1); boxPass(A, Cs, h, w, w, 1, 1);
+  boxPass(Cs, A, w, h, 1, w, 1); boxPass(A, Cs, h, w, w, 1, 1);
+  maxPass(Ls, A, w, h, 1, w); maxPass(A, B, h, w, w, 1);              // 주변에서 가장 밝은 종이
   const rb = Math.max(3, R >> 1);
   boxPass(B, A, w, h, 1, w, rb); boxPass(A, B, h, w, w, 1, rb);        // 부드럽게
+  // 사진마다 종이가 얼마나 얼룩덜룩한지 재서 기준을 정해요 (대부분의 점은 종이라서 가운데값 = 종이)
+  const sampL = [], sampC = [];
+  for (let j=0; j<n; j+=5){ sampL.push(B[j] - Ls[j]); sampC.push(Cs[j] - EC[j]); }
+  const med = a => { const s = a.slice().sort((p,q)=>p-q); return s[s.length >> 1]; };
+  const mL = med(sampL), madL = med(sampL.map(v => Math.abs(v - mL)));
+  const mC = med(sampC), madC = med(sampC.map(v => Math.abs(v - mC)));
+  const tL = mL + Math.max(10, 4.5 * madL), sL = Math.max(18, 5 * madL);
+  const tC = mC + Math.max(18, 5 * madC),   sC = Math.max(22, 5 * madC);
   const ink = new Uint8Array(n);
   for (let j=0; j<n; j++){
-    const al = (B[j] - Lm[j] - 12) / 22, ac = (C[j] - EC[j] - 22) / 26;
+    const al = (B[j] - Ls[j] - tL) / sL, ac = (Cs[j] - EC[j] - tC) / sC;
     const a = Math.max(al, ac);
     ink[j] = a <= 0 ? 0 : a >= 1 ? 255 : Math.round(a * 255);
   }
+  // 외톨이 점(잡티) 지우기: 주변 3×3 에 그림이 거의 없으면 종이
+  {
+    const tmp = new Uint8Array(ink);
+    for (let y=1; y<h-1; y++) for (let x=1; x<w-1; x++){
+      const j = y*w + x; if (!tmp[j]) continue;
+      let c = 0;
+      for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++) if (tmp[j + dy*w + dx] > 40) c++;
+      if (c <= 2) ink[j] = 0;
+    }
+  }
   // 사진 가장자리에 붙은 작은 얼룩(책상, 종이 끝, 물건)은 지우기
   const seen = new Uint8Array(n), stack = new Int32Array(n), comp = new Int32Array(n);
-  const limit = n * 0.02;
+  const limit = n * 0.035;
   const tryFill = start => {
     if (seen[start] || ink[start] < 60) return;
     let sp = 0, cn = 0; stack[sp++] = start; seen[start] = 1;
@@ -1041,8 +1067,8 @@ function computeInk(){
   };
   for (let x=0; x<w; x++){ tryFill(x); tryFill((h-1)*w + x); }
   for (let y=0; y<h; y++){ tryFill(y*w); tryFill(y*w + w-1); }
-  // 가장자리 2% 는 부드럽게 사라지게
-  const m = Math.max(4, Math.round(Math.min(w,h) * 0.02));
+  // 가장자리 3% 는 부드럽게 사라지게
+  const m = Math.max(5, Math.round(Math.min(w,h) * 0.03));
   for (let y=0; y<h; y++) for (let x=0; x<w; x++){
     const k = Math.min(x, y, w-1-x, h-1-y);
     if (k < m) ink[y*w+x] = Math.round(ink[y*w+x] * k / m);
