@@ -41,6 +41,10 @@ header{display:flex;flex-direction:column;gap:4px}
 h1{font-family:var(--display);font-weight:400;font-size:clamp(32px,7vw,44px);line-height:1.2;margin:0;text-wrap:balance}
 h1 .mark{background:linear-gradient(transparent 58%,var(--crayon) 58%,var(--crayon) 88%,transparent 88%)}
 .lead{margin:0;color:var(--soft)}
+.titlerow{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.titlerow h1{min-width:0}
+.homebtn{font-size:18px;min-height:48px;padding:8px 16px;flex:none}
+.homebtn.ask{background:#fff4f2;border-color:var(--red);color:var(--red)}
 
 .step{background:var(--card);border:2px solid var(--line);border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:14px}
 .step h2{font-family:var(--display);font-weight:400;font-size:24px;margin:0;display:flex;align-items:center;gap:10px}
@@ -84,6 +88,10 @@ h1 .mark{background:linear-gradient(transparent 58%,var(--crayon) 58%,var(--cray
 .scene[aria-pressed="true"]{border-color:var(--blue);background:#e8f0ff}
 .scene:focus-visible{outline:3px solid var(--crayon)}
 .scene span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.cropbox{border:3px solid var(--crayon);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fffaf0}
+.crop-title{margin:0;font-family:var(--display);font-size:22px}
+.cropstage{border-radius:12px;overflow:hidden;background:#2b3238;display:grid;place-items:center}
+.cropstage canvas{display:block;max-width:100%;height:auto;touch-action:none;cursor:grab}
 .modebar{border:3px solid var(--blue);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;background:#f2f7ff}
 .modebar.cut{border-color:var(--red);background:#fff4f2}
 .modebar > p:first-child{margin:0;font-family:var(--display);font-size:22px}
@@ -125,8 +133,11 @@ input[type=text]:focus,textarea:focus{outline:none;border-color:var(--blue)}
 
   <header>
     <span class="eyebrow">2학년 발명가 교실</span>
-    <h1>내 <span class="mark">발명품</span>을 움직여요!</h1>
-    <p class="lead">그림을 찍고, 움직일 부분을 손가락으로 빙 둘러 그린 다음, 어떻게 움직일지 골라요.</p>
+    <div class="titlerow">
+      <h1>내 <span class="mark">발명품</span>을 움직여요!</h1>
+      <button class="btn btn-sub homebtn" id="btnHome" type="button">🏠 처음으로</button>
+    </div>
+    <p class="lead">그림을 찍고 종이만 고른 다음, 움직일 부분을 손가락으로 빙 둘러 그리고 어떻게 움직일지 골라요.</p>
   </header>
 
   <!-- ① 찍기 -->
@@ -138,6 +149,17 @@ input[type=text]:focus,textarea:focus{outline:none;border-color:var(--blue)}
     <div class="row">
       <button class="btn btn-main" id="btnCamera" type="button">📷 사진 찍기</button>
       <button class="btn btn-sub" id="btnAlbum" type="button">🖼️ 앨범에서 고르기</button>
+    </div>
+
+    <div class="cropbox" id="cropBox" hidden>
+      <p class="crop-title">📐 그림 종이만 골라요</p>
+      <p class="hint">노란 동그라미 4개를 <b>종이의 네 귀퉁이</b>로 끌어서 맞춰요. 책상이나 필통은 밖으로 빼요.</p>
+      <div class="cropstage"><canvas id="crop" aria-label="찍은 사진. 동그라미를 끌어서 종이 귀퉁이에 맞춰요."></canvas></div>
+      <div class="row">
+        <button class="btn btn-main" id="btnCropOk" type="button">✅ 이대로 자르기</button>
+        <button class="btn btn-sub" id="btnCropAuto" type="button">🔍 종이 다시 찾기</button>
+      </div>
+      <button class="btn btn-sub" id="btnCropSkip" type="button" style="font-size:18px;min-height:48px">자르지 않고 사진 그대로 쓰기</button>
     </div>
   </section>
 
@@ -637,16 +659,188 @@ $("album").onchange  = e => loadPhoto(e.target.files[0]);
 
 function loadPhoto(file){
   if (!file) return;
+  if (S.base) resetAll(false);   // 새 사진 = 새 작품: 이전 선택은 모두 지워요
   const img = new Image();
-  img.onload = () => setupImage(img);
+  img.onload = () => startCrop(img);
   img.onerror = () => { $("makeHint").textContent = "사진을 열 수 없었어요. 다시 찍어 볼까요?"; };
   img.src = URL.createObjectURL(file);
+  $("camera").value = ""; $("album").value = "";
+}
+
+/* ---------- ① 종이만 고르기 (문서 스캔처럼) ---------- */
+const crop = $("crop"), cctx = crop.getContext("2d");
+const C = { src:null, quad:null, drag:-1 };   // src: 사진(최대 1400px), quad: 귀퉁이 4개 [왼위, 오위, 오아래, 왼아래] (src 좌표)
+
+function startCrop(img){
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const k = Math.min(1, 1400 / Math.max(iw, ih));
+  C.src = makeCanvas(Math.round(iw * k), Math.round(ih * k));
+  C.src.getContext("2d").drawImage(img, 0, 0, C.src.width, C.src.height);
+  const v = Math.min(1, 900 / Math.max(C.src.width, C.src.height));
+  crop.width = Math.round(C.src.width * v); crop.height = Math.round(C.src.height * v);
+  C.view = v;
+  C.quad = findPaper(C.src);
+  $("cropBox").hidden = false;
+  drawCrop();
+  $("cropBox").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+/* 사진에서 가장 큰 하얀 종이를 찾아 네 귀퉁이 고르기 */
+function findPaper(src){
+  const k = Math.min(1, 220 / Math.max(src.width, src.height));
+  const w = Math.max(8, Math.round(src.width * k)), h = Math.max(8, Math.round(src.height * k));
+  const t = makeCanvas(w, h), tg = t.getContext("2d", { willReadFrequently:true });
+  tg.drawImage(src, 0, 0, w, h);
+  const d = tg.getImageData(0, 0, w, h).data, n = w*h;
+  const L = new Uint8Array(n), sat = new Float32Array(n), hist = new Array(256).fill(0);
+  for (let i=0, j=0; j<n; i+=4, j++){
+    const r = d[i], g = d[i+1], b = d[i+2], mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    L[j] = Math.round(0.3*r + 0.59*g + 0.11*b); sat[j] = mx ? (mx - mn) / mx : 0; hist[L[j]]++;
+  }
+  // 밝은 쪽과 어두운 쪽을 가르는 기준 (오츠 방법)
+  let sum = 0; for (let i=0; i<256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 160;
+  for (let i=0; i<256; i++){
+    wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break;
+    sB += i * hist[i]; const mB = sB / wB, mF = (sum - sB) / wF, between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best){ best = between; th = i; }
+  }
+  const isPaper = j => L[j] > th && sat[j] < 0.32;
+  // 가장 큰 덩어리
+  const lab = new Int32Array(n).fill(-1), stack = new Int32Array(n);
+  let bestId = -1, bestSize = 0, id = 0;
+  for (let s0=0; s0<n; s0++){
+    if (lab[s0] !== -1 || !isPaper(s0)) continue;
+    let sp = 0, size = 0; stack[sp++] = s0; lab[s0] = id;
+    while (sp){
+      const p = stack[--sp]; size++;
+      const x = p % w, y = (p / w) | 0;
+      const nb = [x>0 ? p-1 : -1, x<w-1 ? p+1 : -1, y>0 ? p-w : -1, y<h-1 ? p+w : -1];
+      for (const q of nb) if (q >= 0 && lab[q] === -1 && isPaper(q)){ lab[q] = id; stack[sp++] = q; }
+    }
+    if (size > bestSize){ bestSize = size; bestId = id; }
+    id++;
+  }
+  const W = src.width, H = src.height;
+  const inset = f => [[W*f, H*f], [W*(1-f), H*f], [W*(1-f), H*(1-f)], [W*f, H*(1-f)]];
+  if (bestId < 0 || bestSize < n * 0.12 || bestSize > n * 0.97) return inset(0.05);
+  // 덩어리 안의 구멍(그림 선)은 상관없이, 바깥 귀퉁이 4개만 찾기
+  let tl = [0,0,1e9], tr = [0,0,-1e9], br = [0,0,-1e9], bl = [0,0,1e9];
+  for (let p=0; p<n; p++){
+    if (lab[p] !== bestId) continue;
+    const x = p % w, y = (p / w) | 0, s = x + y, df = x - y;
+    if (s < tl[2]) tl = [x, y, s];
+    if (s > br[2]) br = [x, y, s];
+    if (df > tr[2]) tr = [x, y, df];
+    if (df < bl[2]) bl = [x, y, df];
+  }
+  const sc = 1 / k, pad = 0.5;
+  return [[tl[0]+pad, tl[1]+pad], [tr[0]+1-pad, tr[1]+pad], [br[0]+1-pad, br[1]+1-pad], [bl[0]+pad, bl[1]+1-pad]]
+    .map(([x, y]) => [Math.max(0, Math.min(W, x * sc)), Math.max(0, Math.min(H, y * sc))]);
+}
+
+function drawCrop(){
+  const v = C.view, g = cctx, q = C.quad.map(([x,y]) => [x*v, y*v]);
+  g.setTransform(1,0,0,1,0,0);
+  g.drawImage(C.src, 0, 0, crop.width, crop.height);
+  // 종이 바깥은 어둡게
+  g.save();
+  g.beginPath(); g.rect(0, 0, crop.width, crop.height);
+  g.moveTo(q[0][0], q[0][1]); for (let i=1; i<4; i++) g.lineTo(q[i][0], q[i][1]); g.closePath();
+  g.fillStyle = "rgba(20,25,30,.55)"; g.fill("evenodd");
+  g.restore();
+  const cssScale = crop.width / (crop.getBoundingClientRect().width || crop.width);
+  const lw = Math.max(3, 3 * cssScale), R = Math.max(14, 16 * cssScale);
+  g.lineJoin = "round";
+  g.beginPath(); g.moveTo(q[0][0], q[0][1]); for (let i=1; i<4; i++) g.lineTo(q[i][0], q[i][1]); g.closePath();
+  g.strokeStyle = "#ffffff"; g.lineWidth = lw + 3; g.stroke();
+  g.strokeStyle = "#f2b62b"; g.lineWidth = lw; g.stroke();
+  q.forEach(([x, y], i) => {
+    g.beginPath(); g.arc(x, y, R, 0, TAU);
+    g.fillStyle = i === C.drag ? "rgba(242,182,43,.95)" : "rgba(242,182,43,.75)"; g.fill();
+    g.strokeStyle = "#ffffff"; g.lineWidth = lw; g.stroke();
+  });
+}
+
+function cropPoint(e){
+  const r = crop.getBoundingClientRect();
+  return [ (e.clientX - r.left) * crop.width / r.width / C.view, (e.clientY - r.top) * crop.height / r.height / C.view ];
+}
+crop.addEventListener("pointerdown", e => {
+  if (!C.src) return;
+  e.preventDefault();
+  const p = cropPoint(e);
+  let bi = 0, bd = 1e18;   // 가장 가까운 동그라미를 잡아요
+  C.quad.forEach(([x, y], i) => { const dd = (x-p[0])**2 + (y-p[1])**2; if (dd < bd){ bd = dd; bi = i; } });
+  C.drag = bi; crop.setPointerCapture(e.pointerId);
+  C.quad[bi] = clampPt(p); drawCrop();
+});
+crop.addEventListener("pointermove", e => {
+  if (C.drag < 0) return;
+  C.quad[C.drag] = clampPt(cropPoint(e)); drawCrop();
+});
+const endCropDrag = () => { if (C.drag >= 0){ C.drag = -1; drawCrop(); } };
+crop.addEventListener("pointerup", endCropDrag);
+crop.addEventListener("pointercancel", endCropDrag);
+function clampPt([x, y]){ return [Math.max(0, Math.min(C.src.width, x)), Math.max(0, Math.min(C.src.height, y))]; }
+
+$("btnCropAuto").onclick = () => { C.quad = findPaper(C.src); drawCrop(); };
+$("btnCropSkip").onclick = () => { $("cropBox").hidden = true; setupImage(C.src); };
+$("btnCropOk").onclick = () => {
+  const out = warpQuad(C.src, C.quad);
+  $("cropBox").hidden = true;
+  setupImage(out || C.src);
+};
+
+/* 비스듬한 네모를 반듯한 네모로 펴기 */
+function warpQuad(src, quad){
+  const dist = (a, b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
+  let ow = (dist(quad[0], quad[1]) + dist(quad[3], quad[2])) / 2;
+  let oh = (dist(quad[0], quad[3]) + dist(quad[1], quad[2])) / 2;
+  if (ow < 20 || oh < 20) return null;
+  const k = Math.min(1, 1000 / Math.max(ow, oh));
+  ow = Math.round(ow * k); oh = Math.round(oh * k);
+  // 반듯한 네모 (u,v) → 사진 (x,y) 로 가는 식 구하기
+  const D = [[0,0],[ow,0],[ow,oh],[0,oh]];
+  const A = [], bvec = [];
+  for (let i=0; i<4; i++){
+    const [u, v] = D[i], [x, y] = quad[i];
+    A.push([u, v, 1, 0, 0, 0, -u*x, -v*x]); bvec.push(x);
+    A.push([0, 0, 0, u, v, 1, -u*y, -v*y]); bvec.push(y);
+  }
+  const hm = solve8(A, bvec); if (!hm) return null;
+  const sd = src.getContext("2d").getImageData(0, 0, src.width, src.height).data, sw = src.width, sh = src.height;
+  const out = makeCanvas(ow, oh), og = out.getContext("2d"), od = og.createImageData(ow, oh), o = od.data;
+  for (let v=0; v<oh; v++) for (let u=0; u<ow; u++){
+    const den = hm[6]*u + hm[7]*v + 1;
+    let x = (hm[0]*u + hm[1]*v + hm[2]) / den, y = (hm[3]*u + hm[4]*v + hm[5]) / den;
+    x = Math.max(0, Math.min(sw - 1.001, x)); y = Math.max(0, Math.min(sh - 1.001, y));
+    const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+    const i00 = (y0*sw + x0)*4, i10 = i00 + 4, i01 = i00 + sw*4, i11 = i01 + 4, oi = (v*ow + u)*4;
+    for (let c=0; c<3; c++){
+      o[oi+c] = (sd[i00+c]*(1-fx) + sd[i10+c]*fx) * (1-fy) + (sd[i01+c]*(1-fx) + sd[i11+c]*fx) * fy;
+    }
+    o[oi+3] = 255;
+  }
+  og.putImageData(od, 0, 0);
+  return out;
+}
+function solve8(A, b){
+  const n = 8, M = A.map((r, i) => [...r, b[i]]);
+  for (let c=0; c<n; c++){
+    let piv = c; for (let r=c+1; r<n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-10) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r=0; r<n; r++){ if (r === c) continue; const f = M[r][c] / M[c][c]; for (let k=c; k<=n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
 }
 
 function setupImage(img){
   const MAX = 640;
-  const s = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
-  S.W = Math.round(img.naturalWidth * s); S.H = Math.round(img.naturalHeight * s);
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const s = Math.min(1, MAX / Math.max(iw, ih));
+  S.W = Math.round(iw * s); S.H = Math.round(ih * s);
   S.base = makeCanvas(S.W, S.H);
   S.base.getContext("2d").drawImage(img, 0, 0, S.W, S.H);
   S.paper = guessPaper(S.base);
@@ -1481,14 +1675,45 @@ function showResult(blob){
   $("result").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 $("btnEdit").onclick = () => $("step2").scrollIntoView({ behavior:"smooth", block:"start" });
-$("btnRestart").onclick = () => {
-  S.base = null; S.parts = []; S.pending = null; setMode("draw");
+/* 모든 선택을 처음 상태로 (그림, 움직임, 배경, 크기, 빠르기, 이름) */
+function resetAll(scroll = true){
+  S.base = null; S.parts = []; S.pending = null; S.drawing = null; setMode("draw");
   view.hidden = true; $("stageEmpty").hidden = false; $("tip").hidden = true; $("picker").hidden = true;
   ["step2","stepBg","step3","step4"].forEach(id => $(id).classList.add("locked"));
-  $("parts").textContent = ""; $("name").value = ""; $("desc").value = "";
+  $("parts").textContent = ""; $("partsHint").hidden = true;
+  $("name").value = ""; $("desc").value = "";
   $("camera").value = ""; $("album").value = "";
-  $("result").hidden = true; updateMake();
-  window.scrollTo({ top:0, behavior:"smooth" });
+  $("cropBox").hidden = true; C.src = null; C.drag = -1;
+  // 버튼 묶음은 기본값으로
+  const setSeg = (id, v) => [...$(id).children].forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v ? "true" : "false"));
+  S.whole = "none"; setSeg("segWhole", "none");
+  S.dur = 2; setSeg("segSpeed", "2");
+  S.size = 0.8; setSeg("segSize", "0.8");
+  S.custom = null;
+  const own = $("scenes").querySelector('[data-key="custom"]');
+  if (own && own.firstChild.tagName === "CANVAS"){ const th = document.createElement("div"); th.className = "thumb"; th.textContent = "🖍️"; own.firstChild.replaceWith(th); }
+  pickScene("none");
+  const bv = $("bgView"); bv.getContext("2d").clearRect(0, 0, bv.width, bv.height);
+  $("result").hidden = true; $("bar").hidden = true;
+  if (lastUrl){ URL.revokeObjectURL(lastUrl); lastUrl = null; }
+  $("gif").removeAttribute("src");
+  updateMake();
+  if (scroll) window.scrollTo({ top:0, behavior:"smooth" });
+}
+$("btnRestart").onclick = () => resetAll();
+
+/* 🏠 처음으로: 실수로 누르지 않게 한 번 더 물어봐요 */
+let homeTimer = null;
+$("btnHome").onclick = () => {
+  const b = $("btnHome");
+  if (!b.classList.contains("ask")){
+    b.classList.add("ask"); b.textContent = "정말? 한 번 더!";
+    clearTimeout(homeTimer);
+    homeTimer = setTimeout(() => { b.classList.remove("ask"); b.textContent = "🏠 처음으로"; }, 3500);
+    return;
+  }
+  clearTimeout(homeTimer); b.classList.remove("ask"); b.textContent = "🏠 처음으로";
+  resetAll();
 };
 
 /* ---------- 색 줄이기 (중간값 자르기, 모든 장면에 같은 색표를 써서 깜빡임 없음) ---------- */
